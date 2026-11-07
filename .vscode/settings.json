@@ -1,3 +1,4 @@
+
 {
-    "cmake.sourceDirectory": "/home/spija/hike/hiking-terrain/backend"
+    "cmake.sourceDirectory": "${workspaceFolder}/backend"
 }
