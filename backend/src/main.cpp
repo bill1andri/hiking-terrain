@@ -1,54 +1,67 @@
-#include<iostream>
-#include"Grid.hpp"
-#include<stdexcept>
-#include<iomanip>
-using namespace std;
+#include "Grid.hpp"
+#include "GridIO.hpp"
 
+#include <iomanip>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
-void printgrid(const Grid& g){
-    for(int r =0; r < g.rows();r++) { 
-        for(int c = 0; c <g.cols(); c++){
-            std::cout << std::setw(6) << g.at(r, c); 
+// Τυπώνει το πλέγμα σαν πίνακα, με στοιχισμένες στήλες.
+void printgrid(const Grid& g) {
+    for (int r = 0; r < g.rows(); r++) {
+        for (int c = 0; c < g.cols(); c++) {
+            std::cout << std::setw(6) << g.at(r, c);
         }
-        cout<<'\n';
+        std::cout << '\n';
     }
 }
 
-void fill(Grid& g) { 
-    //h=10r+c
-    for(int i = 0; i <g.rows();i++){
-        for(int j = 0; j<g.cols();j++){
-            g.set(i,j,100+15*j);
+int main() {
+    // 1. Το σωστό αρχείο πρέπει να φορτώνει
+    try {
+        Grid g = loadGridCsv("data/slope_4x4.csv", 30.0);
+        std::cout << "Loaded " << g.rows() << "x" << g.cols()
+                  << " grid, cellsize " << g.cellsize() << " m\n";
+        printgrid(g);
+    } catch (const std::runtime_error& e) {
+        std::cerr << "Error: " << e.what() << '\n';
+        return 1;
+    }
+
+    // 2. Τα κακά αρχεία πρέπει ΟΛΑ να απορρίπτονται
+    std::cout << "\nBad file tests:\n";
+    const std::vector<std::string> badFiles = {
+        "data/bad_ragged.csv",
+        "data/bad_number.csv",
+        "data/bad_empty.csv",
+        "data/does_not_exist.csv",
+    };
+
+    int failures = 0;
+    for (const std::string& file : badFiles) {
+        try {
+            loadGridCsv(file, 30.0);
+            std::cout << "BUG " << file << " was accepted\n";
+            failures++;
+        } catch (const std::runtime_error& e) {
+            std::cout << "OK  " << e.what() << '\n';
         }
     }
-}
-int main() { 
-    Grid g(3,4,30.0);
-     // 3. Γραμμή 3 σε πλέγμα με 3 γραμμές (0, 1, 2)
+
+    // 3. Λάθος cellsize: το πιάνει ο constructor της Grid
     try {
-        g.set(3, 0, 50.0);
-        cout << "BUG: set(3, 0) did not throw\n";
-    } catch (const std::out_of_range& e) {
-        cout << "OK  set(3, 0):     " << e.what() << '\n';
+        loadGridCsv("data/slope_4x4.csv", 0.0);
+        std::cout << "BUG cellsize 0 was accepted\n";
+        failures++;
+    } catch (const std::invalid_argument& e) {
+        std::cout << "OK  " << e.what() << '\n';
     }
 
-    // 4. Δύο αρνητικές διαστάσεις (το γινόμενο θα ήταν θετικό!)
-    try {
-        Grid bad(-2, -3, 30.0);
-        cout << "BUG: Grid(-2, -3, 30) did not throw\n";
-    } catch (const invalid_argument& e) {
-        cout << "OK  Grid(-2,-3,30): " << e.what() << '\n';
+    if (failures > 0) {
+        std::cout << '\n' << failures << " test(s) FAILED\n";
+        return 1;
     }
-
-    // 5. Μηδενικό cellsize
-    try {
-        Grid bad(3, 4, 0.0);
-        cout << "BUG: Grid(3, 4, 0) did not throw\n";
-    } catch (const invalid_argument& e) {
-        cout << "OK  Grid(3,4,0):    " << e.what() << '\n';
-    }
-    fill(g);
-    printgrid(g);
+    std::cout << "\nAll tests passed\n";
     return 0;
-
 }
