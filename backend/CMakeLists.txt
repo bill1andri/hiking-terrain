@@ -46,5 +46,12 @@ add_test(NAME cli_bad_cellsize
 add_test(NAME cli_no_args
          COMMAND terrain
          WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME cli_nan_cellsize
+         COMMAND terrain data/diag_4x4.csv nan
+         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME cli_inf_cellsize
+         COMMAND terrain data/diag_4x4.csv inf
+         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 set_tests_properties(cli_bad_file cli_bad_cellsize cli_no_args
+                     cli_nan_cellsize cli_inf_cellsize
                      PROPERTIES WILL_FAIL TRUE)

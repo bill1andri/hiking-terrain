@@ -77,6 +77,18 @@ int main() {
         std::cout << "OK  " << e.what() << '\n';
     }
 
+    // Μη πεπερασμένο cellsize (nan, inf): πρέπει να πετάξει std::invalid_argument
+    const std::vector<double> badCellsizes = {NAN, INFINITY};
+    for (double cs : badCellsizes) {
+        try {
+            Grid g(3, 4, cs);
+            std::cout << "BUG cellsize " << cs << " was accepted\n";
+            failures++;
+        } catch (const std::invalid_argument& e) {
+            std::cout << "OK  " << e.what() << '\n';
+        }
+    }
+
     // ---------- 2. Κλίσεις με γνωστή απάντηση ----------
     std::cout << "\n== Slopes ==\n";
 
