@@ -5,6 +5,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <cmath>
 
 // Μετατρέπει ένα κελί σε αριθμό, αλλιώς πετάει μήνυμα με τη γραμμή.
 // static: υπάρχει μόνο μέσα σε αυτό το αρχείο.
@@ -19,6 +20,9 @@ static double parseCell(const std::string& cell, int lineNo) {
         throw std::runtime_error(error);
     }
     if (pos != cell.size()) {           // "12abc" -> διάβασε μόνο το "12"
+        throw std::runtime_error(error);
+    }
+    if (!std::isfinite(v)) {            // "nan", "inf" -> το stod τα δέχεται
         throw std::runtime_error(error);
     }
     return v;
@@ -36,6 +40,9 @@ Grid loadGridCsv(const std::string& path, double cellsize) {
 
     while (std::getline(in, line)) {
         const int lineNo = rows + 1;  // οι άνθρωποι μετράνε από το 1
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();  // αρχεία από Windows τελειώνουν σε \r\n
+        }
         int count = 0;
         std::stringstream ss(line);   // η γραμμή γίνεται stream
         std::string cell;
