@@ -1,54 +1,92 @@
-#include<iostream>
-#include"Grid.hpp"
-#include<stdexcept>
-#include<iomanip>
-using namespace std;
+// terrain: διαβάζει ένα CSV υψομέτρων και τυπώνει κλίσεις και δυσκολία.
+//
+// Χρήση:   terrain <file.csv> <cellsize_in_meters>
+// Π.χ.:    ./build/terrain data/diag_4x4.csv 30
+//
+// Exit code: 0 = όλα καλά, 1 = λάθος είσοδος (μήνυμα στο stderr).
 
+#include "Difficulty.hpp"
+#include "Gradient.hpp"
+#include "Grid.hpp"
+#include "GridIO.hpp"
 
-void printgrid(const Grid& g){
-    for(int r =0; r < g.rows();r++) { 
-        for(int c = 0; c <g.cols(); c++){
-            std::cout << std::setw(6) << g.at(r, c); 
+#include <array>
+#include <exception>
+#include <iomanip>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+
+// Τυπώνει το πλέγμα σαν πίνακα, με 2 δεκαδικά.
+static void printGrid(const Grid& g) {
+    for (int r = 0; r < g.rows(); r++) {
+        for (int c = 0; c < g.cols(); c++) {
+            std::cout << std::setw(8) << std::fixed << std::setprecision(2)
+                      << g.at(r, c);
         }
-        cout<<'\n';
+        std::cout << '\n';
     }
 }
 
-void fill(Grid& g) { 
-    //h=10r+c
-    for(int i = 0; i <g.rows();i++){
-        for(int j = 0; j<g.cols();j++){
-            g.set(i,j,100+15*j);
-        }
+// Αυστηρή μετατροπή του cellsize: "30" ok, "30m" / "abc" / "" όχι.
+static double parseCellsize(const std::string& s) {
+    std::size_t pos = 0;
+    double v = 0.0;
+    try {
+        v = std::stod(s, &pos);
+    } catch (const std::exception&) {
+        throw std::invalid_argument("cellsize is not a number: '" + s + "'");
     }
+    if (pos != s.size()) {
+        throw std::invalid_argument("cellsize is not a number: '" + s + "'");
+    }
+    return v;  // το Grid ελέγχει ότι είναι > 0
 }
-int main() { 
-    Grid g(3,4,30.0);
-     // 3. Γραμμή 3 σε πλέγμα με 3 γραμμές (0, 1, 2)
-    try {
-        g.set(3, 0, 50.0);
-        cout << "BUG: set(3, 0) did not throw\n";
-    } catch (const std::out_of_range& e) {
-        cout << "OK  set(3, 0):     " << e.what() << '\n';
+
+int main(int argc, char* argv[]) {
+    if (argc != 3) {
+        std::cerr << "Usage: " << argv[0] << " <file.csv> <cellsize_in_meters>\n"
+                  << "Example: " << argv[0] << " data/diag_4x4.csv 30\n";
+        return 1;
     }
 
-    // 4. Δύο αρνητικές διαστάσεις (το γινόμενο θα ήταν θετικό!)
     try {
-        Grid bad(-2, -3, 30.0);
-        cout << "BUG: Grid(-2, -3, 30) did not throw\n";
-    } catch (const invalid_argument& e) {
-        cout << "OK  Grid(-2,-3,30): " << e.what() << '\n';
-    }
+        const std::string path = argv[1];
+        const double cellsize = parseCellsize(argv[2]);
 
-    // 5. Μηδενικό cellsize
-    try {
-        Grid bad(3, 4, 0.0);
-        cout << "BUG: Grid(3, 4, 0) did not throw\n";
-    } catch (const invalid_argument& e) {
-        cout << "OK  Grid(3,4,0):    " << e.what() << '\n';
+        Grid heights = loadGridCsv(path, cellsize);
+        std::cout << "Loaded " << path << ": " << heights.rows() << "x"
+                  << heights.cols() << " grid, cellsize " << cellsize << " m\n";
+
+        std::cout << "\nHeights (m):\n";
+        printGrid(heights);
+
+        Grid slopes = slopeGrid(heights);
+        std::cout << "\nSlopes (degrees):\n";
+        printGrid(slopes);
+
+        // Χάρτης δυσκολίας + μέτρημα ανά κατηγορία
+        std::array<int, 4> counts{};  // Easy, Moderate, Steep, VerySteep
+        std::cout << "\nDifficulty:\n";
+        for (int r = 0; r < slopes.rows(); r++) {
+            for (int c = 0; c < slopes.cols(); c++) {
+                Difficulty d = classify(slopes.at(r, c));
+                counts[static_cast<int>(d)]++;
+                std::cout << std::setw(12) << toString(d);
+            }
+            std::cout << '\n';
+        }
+
+        std::cout << "\nSummary:\n";
+        const Difficulty all[] = {Difficulty::Easy, Difficulty::Moderate,
+                                  Difficulty::Steep, Difficulty::VerySteep};
+        for (Difficulty d : all) {
+            std::cout << "  " << std::left << std::setw(12) << toString(d)
+                      << std::right << counts[static_cast<int>(d)] << '\n';
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Error: " << e.what() << '\n';
+        return 1;
     }
-    fill(g);
-    printgrid(g);
     return 0;
-
 }

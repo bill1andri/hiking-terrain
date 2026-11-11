@@ -1,8 +1,9 @@
 #include<vector>
 #include <stdexcept>
+#include <cmath>
 #include "Grid.hpp"
 static void validation(int r, int c, double cs) { 
-    if(r <= 0 || c<=0 || cs<=0.0){
+    if(r <= 0 || c<=0 || !std::isfinite(cs) || cs<=0.0){
         throw std::invalid_argument("Grid: rows, cols and cellsize must be positive");
     }
 }
