@@ -29,3 +29,4 @@ std::string toString(Difficulty d) {
     // Δεν φτάνει ποτέ εδώ, αλλά ο compiler θέλει κάτι μετά το switch.
     throw std::logic_error("toString: invalid Difficulty value");
 }
+
