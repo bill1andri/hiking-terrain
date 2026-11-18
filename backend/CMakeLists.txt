@@ -10,7 +10,7 @@ add_library(terrain_core STATIC
     src/Gradient.cpp
     src/Difficulty.cpp
     src/DemLoader.cpp
-    src/dem_probe.cpp
+    src/GeoUtils.cpp
 )
 # PUBLIC: όποιος κάνει link στο terrain_core βλέπει αυτόματα το include/
 target_include_directories(terrain_core PUBLIC include)

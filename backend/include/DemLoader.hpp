@@ -10,13 +10,13 @@ private:
     std::vector<std::int16_t> _data;
 public:
     DemTile(int s, double ls, double lw, std::vector<std::int16_t> d);
-    int size() { 
+    int size() const{ 
         return _size;
     }
-    double latSouth() { 
+    double latSouth() const{ 
         return _latSouth;
     }
-    double lonWest(){
+    double lonWest() const{
         return _lonWest;
     }
     std::int16_t at(int r, int c) const;
