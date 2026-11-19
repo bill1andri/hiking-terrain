@@ -76,3 +76,5 @@ build/
 # Μυστικά
 .env
 hiking-terrain.code-workspace
+
+output/

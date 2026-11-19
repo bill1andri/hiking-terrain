@@ -6,6 +6,8 @@
 #include <iostream>
 #include <iomanip>
 #include <exception>
+#include "Export.hpp"
+#include <filesystem>
 
 int main(int argc, char* argv[]) {
     try {
@@ -60,10 +62,14 @@ int main(int argc, char* argv[]) {
         std::cout << "  at lat " << where.lat << ", lon " << where.lon
                   << ", elevation " << std::setprecision(0)
                   << heights.at(maxI, maxJ) << " m\n";
-
+        std::filesystem::create_directories("output");
+        std::vector<SlopePoint> top = topSteepest(heights, slopes, tile, nw, 20, 100.0);
+        writeSlopeCsv("output/steepest.csv", top);
+        std::cout << "Wrote " << top.size() << " points to output/steepest.csv\n";
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << '\n';
         return 1;
     }
     return 0;
 }
+

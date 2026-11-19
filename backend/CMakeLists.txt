@@ -12,6 +12,7 @@ add_library(terrain_core STATIC
     src/DemLoader.cpp
     src/GeoUtils.cpp
     src/Crop.cpp
+    src/Export.cpp
 )
 # PUBLIC: όποιος κάνει link στο terrain_core βλέπει αυτόματα το include/
 target_include_directories(terrain_core PUBLIC include)

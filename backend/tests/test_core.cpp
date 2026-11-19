@@ -3,6 +3,7 @@
 #include "Crop.hpp"
 #include "DemLoader.hpp"
 #include "Difficulty.hpp"
+#include "Export.hpp"
 #include "GeoUtils.hpp"
 #include "Gradient.hpp"
 #include "Grid.hpp"
@@ -11,6 +12,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <stdexcept>
@@ -579,6 +582,218 @@ int main() {
                   << g.cols() << ")\n";
     } catch (const std::exception& e) {
         std::cout << "BUG void outside window threw: " << e.what() << '\n';
+        failures++;
+    }
+
+    // ---------- 7. Export (topSteepest, writeSlopeCsv) ----------
+    std::cout << "\n== Export ==\n";
+
+    // Ψεύτικο tile (όχι το πραγματικό .hgt) και χειροποίητα Grid 5x5, dx=20, dy=40.
+    // slope(i, j) = 1 + 5*i + j: όλες διαφορετικές, μέγιστη 25 στο (4, 4).
+    // height(i, j) = 500 + 10*i + j.
+    try {
+        DemTile tile(3601, 37.0, 23.0, std::vector<std::int16_t>(nn, 0));
+        const TileIndex origin{100, 200};
+        Grid heights(5, 5, 20.0, 40.0);
+        Grid slopes(5, 5, 20.0, 40.0);
+        double maxSlope = 0.0;
+        for (int r = 0; r < slopes.rows(); r++) {
+            for (int c = 0; c < slopes.cols(); c++) {
+                heights.set(r, c, 500.0 + 10.0 * r + c);
+                slopes.set(r, c, 1.0 + 5.0 * r + c);
+                if (slopes.at(r, c) > maxSlope) {
+                    maxSlope = slopes.at(r, c);
+                }
+            }
+        }
+        const double tolExp = 1e-9;
+
+        // 7a. n=3, χωρίς απόσταση: 3 σημεία, αυστηρά φθίνουσα κλίση, πρώτο = μέγιστο
+        try {
+            std::vector<SlopePoint> top = topSteepest(heights, slopes, tile, origin, 3, 0.0);
+            bool descending = true;
+            for (std::size_t k = 1; k < top.size(); k++) {
+                if (!(top[k - 1].slope > top[k].slope)) {
+                    descending = false;
+                }
+            }
+            if (top.size() == 3 && descending && isClose(top[0].slope, maxSlope, tolExp)) {
+                std::cout << "OK  top 3: " << top[0].slope << ", " << top[1].slope
+                          << ", " << top[2].slope << " (descending, first = max)\n";
+            } else {
+                std::cout << "BUG top 3: got " << top.size() << " point(s), descending="
+                          << descending << ", expected 3 descending with first = "
+                          << maxSlope << '\n';
+                failures++;
+            }
+        } catch (const std::exception& e) {
+            std::cout << "BUG topSteepest n=3 threw: " << e.what() << '\n';
+            failures++;
+        }
+
+        // 7b. minDistanceM = 50: κάθε ζεύγος απέχει >= 50 m.
+        // Το (i, j) ανακτάται από lat/lon με latLonToIndex - origin,
+        // και η απόσταση υπολογίζεται με τα dx/dy του Grid.
+        try {
+            const double minDist = 50.0;
+            std::vector<SlopePoint> top = topSteepest(heights, slopes, tile, origin, 10, minDist);
+            int tooClose = 0;
+            for (std::size_t a = 0; a < top.size(); a++) {
+                TileIndex ia = latLonToIndex(tile, top[a].lat, top[a].lon);
+                for (std::size_t b = a + 1; b < top.size(); b++) {
+                    TileIndex ib = latLonToIndex(tile, top[b].lat, top[b].lon);
+                    double di = (ia.r - ib.r) * heights.dy();
+                    double dj = (ia.c - ib.c) * heights.dx();
+                    double dist = std::sqrt(di * di + dj * dj);
+                    if (dist < minDist - tolExp) {
+                        tooClose++;
+                    }
+                }
+            }
+            if (top.size() >= 2 && tooClose == 0) {
+                std::cout << "OK  minDistanceM=50: " << top.size()
+                          << " points, all pairs >= 50 m apart\n";
+            } else {
+                std::cout << "BUG minDistanceM=50: " << top.size() << " point(s), "
+                          << tooClose << " pair(s) closer than 50 m\n";
+                failures++;
+            }
+        } catch (const std::exception& e) {
+            std::cout << "BUG topSteepest minDistanceM=50 threw: " << e.what() << '\n';
+            failures++;
+        }
+
+        // 7c. n μεγαλύτερο από τα κελιά: το πολύ rows*cols σημεία, χωρίς crash
+        try {
+            std::vector<SlopePoint> top = topSteepest(heights, slopes, tile, origin, 1000, 0.0);
+            std::size_t cells = static_cast<std::size_t>(slopes.rows()) * slopes.cols();
+            if (top.size() <= cells) {
+                std::cout << "OK  n=1000 on 5x5 -> " << top.size() << " points\n";
+            } else {
+                std::cout << "BUG n=1000 on 5x5 -> " << top.size()
+                          << " points, expected at most " << cells << '\n';
+                failures++;
+            }
+        } catch (const std::exception& e) {
+            std::cout << "BUG topSteepest n=1000 threw: " << e.what() << '\n';
+            failures++;
+        }
+
+        // 7d. lat/lon = indexToLatLon(tile, origin.r + i, origin.c + j).
+        // Με τα δεδομένα μας τα 3 πιο απότομα είναι (4,4), (4,3), (4,2).
+        try {
+            std::vector<SlopePoint> top = topSteepest(heights, slopes, tile, origin, 3, 0.0);
+            const std::vector<TileIndex> expectedCells = {{4, 4}, {4, 3}, {4, 2}};
+            int wrong = 0;
+            for (std::size_t k = 0; k < top.size() && k < expectedCells.size(); k++) {
+                int i = expectedCells[k].r;
+                int j = expectedCells[k].c;
+                LatLon want = indexToLatLon(tile, origin.r + i, origin.c + j);
+                if (!isClose(top[k].lat, want.lat, tolExp) ||
+                    !isClose(top[k].lon, want.lon, tolExp) ||
+                    !isClose(top[k].elevation, heights.at(i, j), tolExp)) {
+                    std::cout << "BUG point " << k << ": (" << std::setprecision(5)
+                              << top[k].lat << ", " << top[k].lon << ", "
+                              << top[k].elevation << "), expected (" << want.lat << ", "
+                              << want.lon << ", " << heights.at(i, j) << ")\n"
+                              << std::setprecision(2);
+                    wrong++;
+                }
+            }
+            if (top.size() == expectedCells.size() && wrong == 0) {
+                std::cout << "OK  lat/lon/elevation match indexToLatLon(origin + (i, j))\n";
+            } else {
+                failures++;
+            }
+        } catch (const std::exception& e) {
+            std::cout << "BUG topSteepest lat/lon test threw: " << e.what() << '\n';
+            failures++;
+        }
+
+        // 7e. n <= 0: std::invalid_argument
+        const std::vector<int> badNs = {0, -1};
+        for (int badN : badNs) {
+            try {
+                topSteepest(heights, slopes, tile, origin, badN, 0.0);
+                std::cout << "BUG n=" << badN << " was accepted\n";
+                failures++;
+            } catch (const std::invalid_argument& e) {
+                std::cout << "OK  " << e.what() << '\n';
+            }
+        }
+
+        // 7f. minDistanceM αρνητικό ή μη πεπερασμένο: std::invalid_argument
+        const std::vector<double> badDists = {-1.0, NAN, INFINITY};
+        for (double d : badDists) {
+            try {
+                topSteepest(heights, slopes, tile, origin, 3, d);
+                std::cout << "BUG minDistanceM=" << d << " was accepted\n";
+                failures++;
+            } catch (const std::invalid_argument& e) {
+                std::cout << "OK  " << e.what() << '\n';
+            }
+        }
+
+        // 7g. heights και slopes διαφορετικού μεγέθους: std::invalid_argument
+        try {
+            Grid smaller(4, 5, 20.0, 40.0);
+            topSteepest(heights, smaller, tile, origin, 3, 0.0);
+            std::cout << "BUG heights 5x5 with slopes 4x5 was accepted\n";
+            failures++;
+        } catch (const std::invalid_argument& e) {
+            std::cout << "OK  " << e.what() << '\n';
+        }
+
+        // 7h. writeSlopeCsv σε φάκελο που δεν υπάρχει: std::runtime_error
+        try {
+            std::vector<SlopePoint> top = topSteepest(heights, slopes, tile, origin, 3, 0.0);
+            try {
+                writeSlopeCsv("/nonexistent_dir/x.csv", top);
+                std::cout << "BUG writeSlopeCsv to /nonexistent_dir/x.csv was accepted\n";
+                failures++;
+            } catch (const std::runtime_error& e) {
+                std::cout << "OK  " << e.what() << '\n';
+            }
+        } catch (const std::exception& e) {
+            std::cout << "BUG writeSlopeCsv bad-path setup threw: " << e.what() << '\n';
+            failures++;
+        }
+
+        // 7i. writeSlopeCsv σε προσωρινό αρχείο: κεφαλίδα + μία γραμμή ανά σημείο
+        const std::filesystem::path csvPath =
+            std::filesystem::temp_directory_path() / "slope_test.csv";
+        try {
+            std::vector<SlopePoint> top = topSteepest(heights, slopes, tile, origin, 3, 0.0);
+            writeSlopeCsv(csvPath.string(), top);
+
+            std::ifstream in(csvPath);
+            std::string header;
+            std::getline(in, header);
+            std::size_t dataLines = 0;
+            std::string line;
+            while (std::getline(in, line)) {
+                if (!line.empty()) {
+                    dataLines++;
+                }
+            }
+            const std::string expectedHeader = "lat,lon,elevation,slope,difficulty";
+            if (header == expectedHeader && dataLines == top.size()) {
+                std::cout << "OK  CSV header \"" << header << "\" + " << dataLines
+                          << " data line(s)\n";
+            } else {
+                std::cout << "BUG CSV header \"" << header << "\", " << dataLines
+                          << " data line(s), expected \"" << expectedHeader << "\" + "
+                          << top.size() << '\n';
+                failures++;
+            }
+        } catch (const std::exception& e) {
+            std::cout << "BUG writeSlopeCsv temp file threw: " << e.what() << '\n';
+            failures++;
+        }
+        std::error_code ec;  // remove χωρίς exception
+        std::filesystem::remove(csvPath, ec);
+    } catch (const std::exception& e) {
+        std::cout << "BUG Export setup threw: " << e.what() << '\n';
         failures++;
     }
 
