@@ -1,5 +1,6 @@
 // Unit tests για terrain_core. Τρέχουν με: ctest --test-dir build --output-on-failure
 // Πρέπει να τρέχουν από τον φάκελο backend/ (διαβάζουν data/...).
+#include "Crop.hpp"
 #include "DemLoader.hpp"
 #include "Difficulty.hpp"
 #include "GeoUtils.hpp"
@@ -8,11 +9,13 @@
 #include "GridIO.hpp"
 
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 // Τυπώνει το πλέγμα σαν πίνακα, με 2 δεκαδικά.
@@ -407,6 +410,176 @@ int main() {
         failures++;
     } catch (const std::invalid_argument& e) {
         std::cout << "OK  " << e.what() << '\n';
+    }
+
+    // ---------- 6. cropToGrid ----------
+    std::cout << "\n== cropToGrid ==\n";
+
+    // Παράθυρο στον Υμηττό (ψεύτικα tiles, όχι το πραγματικό .hgt)
+    const double latMin = 37.9233;
+    const double latMax = 37.9567;
+    const double lonMin = 23.8033;
+    const double lonMax = 23.8367;
+    const int n = 3601;
+    const std::size_t nn = static_cast<std::size_t>(n) * n;
+
+    // 6a. Διαστάσεις και μέγεθος κελιού (tile με μηδενικά)
+    try {
+        DemTile tile(n, 37.0, 23.0, std::vector<std::int16_t>(nn, 0));
+        Grid g = cropToGrid(tile, latMin, latMax, lonMin, lonMax);
+        if (g.rows() == 121 && g.cols() == 121) {
+            std::cout << "OK  size " << g.rows() << "x" << g.cols() << '\n';
+        } else {
+            std::cout << "BUG size " << g.rows() << "x" << g.cols()
+                      << ", expected 121x121\n";
+            failures++;
+        }
+        if (isClose(g.dx(), 24.36, tolM) && isClose(g.dy(), 30.89, tolM)) {
+            std::cout << "OK  dx=" << g.dx() << " dy=" << g.dy() << '\n';
+        } else {
+            std::cout << "BUG dx=" << g.dx() << " dy=" << g.dy()
+                      << ", expected 24.36 / 30.89\n";
+            failures++;
+        }
+    } catch (const std::exception& e) {
+        std::cout << "BUG cropToGrid size test threw: " << e.what() << '\n';
+        failures++;
+    }
+
+    // 6b. Τα ύψη αντιγράφονται από τη σωστή θέση: h(r, c) = c
+    // Γραμμές βορράς->νότος, στήλες δύση->ανατολή, με offset nw.
+    try {
+        std::vector<std::int16_t> data(nn);
+        for (int r = 0; r < n; r++) {
+            for (int c = 0; c < n; c++) {
+                data[static_cast<std::size_t>(r) * n + c] = static_cast<std::int16_t>(c);
+            }
+        }
+        DemTile tile(n, 37.0, 23.0, std::move(data));
+        TileIndex nw = latLonToIndex(tile, latMax, lonMin);
+        Grid g = cropToGrid(tile, latMin, latMax, lonMin, lonMax);
+        const int cols = g.cols();
+        const int rows = g.rows();
+
+        // Ύψη = ακέραιοι, άρα ακριβή σε double: σύγκριση ως int με ==
+        int got00 = static_cast<int>(g.at(0, 0));
+        int got0last = static_cast<int>(g.at(0, cols - 1));
+        int gotlast0 = static_cast<int>(g.at(rows - 1, 0));
+        if (got00 == nw.c && got0last == nw.c + cols - 1 && gotlast0 == nw.c) {
+            std::cout << "OK  h=c: (0,0)=" << got00 << " (0," << cols - 1 << ")="
+                      << got0last << " (" << rows - 1 << ",0)=" << gotlast0 << '\n';
+        } else {
+            std::cout << "BUG h=c: (0,0)=" << got00 << " (0," << cols - 1 << ")="
+                      << got0last << " (" << rows - 1 << ",0)=" << gotlast0
+                      << ", expected " << nw.c << " / " << nw.c + cols - 1 << " / "
+                      << nw.c << '\n';
+            failures++;
+        }
+    } catch (const std::exception& e) {
+        std::cout << "BUG cropToGrid offset test threw: " << e.what() << '\n';
+        failures++;
+    }
+
+    // 6c. Γνωστή κλίση: h = 10*c -> slope = atan(10 / dx) παντού
+    // (αποδεικνύει ότι το cropToGrid περνάει το πραγματικό dx, όχι το dy)
+    try {
+        std::vector<std::int16_t> data(nn);
+        for (int r = 0; r < n; r++) {
+            for (int c = 0; c < n; c++) {
+                data[static_cast<std::size_t>(r) * n + c] = static_cast<std::int16_t>(10 * c);
+            }
+        }
+        DemTile tile(n, 37.0, 23.0, std::move(data));
+        Grid g = cropToGrid(tile, latMin, latMax, lonMin, lonMax);
+        Grid slopes = slopeGrid(g);
+        double expected = radToDeg(std::atan(10.0 / g.dx()));
+        int wrong = checkAll(slopes, expected, 0.01);
+        if (wrong == 0) {
+            std::cout << "OK  h=10*c: all cells " << expected << " degrees\n";
+        } else {
+            std::cout << "BUG h=10*c: " << wrong << " cell(s) wrong, expected "
+                      << expected << " degrees\n";
+            failures++;
+        }
+    } catch (const std::exception& e) {
+        std::cout << "BUG cropToGrid slope test threw: " << e.what() << '\n';
+        failures++;
+    }
+
+    // 6d. Σφάλματα και voids
+    try {
+        DemTile tile(n, 37.0, 23.0, std::vector<std::int16_t>(nn, 0));
+
+        // latMin >= latMax: std::invalid_argument
+        try {
+            cropToGrid(tile, 37.95, 37.95, lonMin, lonMax);
+            std::cout << "BUG latMin == latMax was accepted\n";
+            failures++;
+        } catch (const std::invalid_argument& e) {
+            std::cout << "OK  " << e.what() << '\n';
+        }
+
+        // lonMin >= lonMax: std::invalid_argument
+        try {
+            cropToGrid(tile, latMin, latMax, lonMax, lonMin);
+            std::cout << "BUG lonMin > lonMax was accepted\n";
+            failures++;
+        } catch (const std::invalid_argument& e) {
+            std::cout << "OK  " << e.what() << '\n';
+        }
+
+        // Παράθυρο εν μέρει έξω από το tile: std::out_of_range
+        try {
+            cropToGrid(tile, latMin, 38.2, lonMin, lonMax);
+            std::cout << "BUG window outside tile (latMax 38.2) was accepted\n";
+            failures++;
+        } catch (const std::out_of_range& e) {
+            std::cout << "OK  " << e.what() << '\n';
+        }
+
+        // Πολύ μικρό παράθυρο (ίδια γραμμή μετά τη στρογγυλοποίηση): std::invalid_argument
+        try {
+            cropToGrid(tile, 37.95000, 37.95001, lonMin, lonMax);
+            std::cout << "BUG window too small was accepted\n";
+            failures++;
+        } catch (const std::invalid_argument& e) {
+            std::cout << "OK  " << e.what() << '\n';
+        }
+    } catch (const std::exception& e) {
+        std::cout << "BUG cropToGrid error tests threw: " << e.what() << '\n';
+        failures++;
+    }
+
+    // Void (-32768) ΜΕΣΑ στο παράθυρο: std::runtime_error
+    try {
+        DemTile probe(n, 37.0, 23.0, std::vector<std::int16_t>(nn, 0));
+        TileIndex v = latLonToIndex(probe, 37.94, 23.82);
+        std::vector<std::int16_t> data(nn, 0);
+        data[static_cast<std::size_t>(v.r) * n + v.c] = -32768;
+        DemTile tile(n, 37.0, 23.0, std::move(data));
+        try {
+            cropToGrid(tile, latMin, latMax, lonMin, lonMax);
+            std::cout << "BUG void inside window was accepted\n";
+            failures++;
+        } catch (const std::runtime_error& e) {
+            std::cout << "OK  " << e.what() << '\n';
+        }
+    } catch (const std::exception& e) {
+        std::cout << "BUG cropToGrid void-inside test threw: " << e.what() << '\n';
+        failures++;
+    }
+
+    // Void ΕΞΩ από το παράθυρο (0, 0): δεν πρέπει να πετάξει
+    try {
+        std::vector<std::int16_t> data(nn, 0);
+        data[0] = -32768;
+        DemTile tile(n, 37.0, 23.0, std::move(data));
+        Grid g = cropToGrid(tile, latMin, latMax, lonMin, lonMax);
+        std::cout << "OK  void outside window ignored (" << g.rows() << "x"
+                  << g.cols() << ")\n";
+    } catch (const std::exception& e) {
+        std::cout << "BUG void outside window threw: " << e.what() << '\n';
+        failures++;
     }
 
     // ---------- Αποτέλεσμα ----------

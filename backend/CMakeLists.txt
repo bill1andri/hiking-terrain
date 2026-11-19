@@ -11,6 +11,7 @@ add_library(terrain_core STATIC
     src/Difficulty.cpp
     src/DemLoader.cpp
     src/GeoUtils.cpp
+    src/Crop.cpp
 )
 # PUBLIC: όποιος κάνει link στο terrain_core βλέπει αυτόματα το include/
 target_include_directories(terrain_core PUBLIC include)
@@ -24,6 +25,10 @@ target_compile_options(terrain PRIVATE -Wall -Wextra -Wpedantic -Wshadow)
 add_executable(dem_probe src/dem_probe.cpp)
 target_link_libraries(dem_probe PRIVATE terrain_core)
 target_compile_options(dem_probe PRIVATE -Wall -Wextra -Wpedantic -Wshadow)
+
+add_executable(crop_probe src/crop_probe.cpp)
+target_link_libraries(crop_probe PRIVATE terrain_core)
+target_compile_options(crop_probe PRIVATE -Wall -Wextra -Wpedantic -Wshadow)
 
 # ---------- Tests (τρέχουν με ctest) ----------
 enable_testing()
