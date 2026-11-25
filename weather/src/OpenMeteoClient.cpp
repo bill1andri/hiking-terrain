@@ -15,15 +15,20 @@ OpenMeteoClient::OpenMeteoClient(const std::string& host, int timeout_sec)
     }
 }
 
-static int computeDaylightLeftMin(const std::string& time_iso, const std::string& sunset_iso) {
-    if(time_iso.size() < 16 || sunset_iso.size() < 16) {
+static int computeDaylightLeftMin(const std::string& time_iso, const std::string& sunrise_iso, const std::string& sunset_iso) {
+    if(time_iso.size() < 16 || sunrise_iso.size() < 16 || sunset_iso.size() < 16) {
         return 0;
     }
 
     int now_min = std::stoi(time_iso.substr(11, 2)) * 60 + std::stoi(time_iso.substr(14, 2));
+    int sunrise_min = std::stoi(sunrise_iso.substr(11, 2)) * 60 + std::stoi(sunrise_iso.substr(14, 2));
     int sunset_min = std::stoi(sunset_iso.substr(11, 2)) * 60 + std::stoi(sunset_iso.substr(14, 2));
 
-    return (sunset_min > now_min) ? (sunset_min - now_min) : 0;
+    if(now_min < sunrise_min || now_min >= sunset_min) {
+        return 0; //Still dark before sunrise or after sunset
+    }
+
+    return sunset_min - now_min;
 }
 
 std::vector<HourlyForecast> OpenMeteoClient::parseResponse(const std::string& json_body) {
@@ -44,9 +49,12 @@ std::vector<HourlyForecast> OpenMeteoClient::parseResponse(const std::string& js
     const auto& daily = j["daily"];
 
     //Map each date ("YYYY-MM-DD") -> its sunset timestamp ("YYYY-MM-DDTHH:MM")
+    std::unordered_map<std::string, std::string> sunrise_by_date;
     std::unordered_map<std::string, std::string> sunset_by_date;
-    if(daily.contains("time") && daily.contains("sunset") && daily["time"].is_array() && daily["sunset"].is_array() && daily["time"].size() == daily["sunset"].size()) {
+    if(daily.contains("time") && daily.contains("sunrise") && daily.contains("sunset") && daily["time"].is_array() && daily["sunrise"].is_array() && daily["sunset"].is_array() && daily["time"].size() == daily["sunset"].size() && daily["time"].size() == daily["sunrise"].size()) {
         for(std::size_t d = 0; d < daily["time"].size(); d++) {
+            std::string day = daily["time"][d].get<std::string>();
+            sunrise_by_date[day] = daily["sunrise"][d].get<std::string>();
             sunset_by_date[daily["time"][d].get<std::string>()] = daily["sunset"][d].get<std::string>();
         }
     }
@@ -92,10 +100,11 @@ std::vector<HourlyForecast> OpenMeteoClient::parseResponse(const std::string& js
         hf.conditions.elevation_m = elev_m;
 
         std::string date_key = hf.time.size() >= 10 ? hf.time.substr(0, 10) : "";
-        auto it = sunset_by_date.find(date_key);
-        if(it != sunset_by_date.end()) {
-            hf.sunset = it->second;
-            hf.daylight_left_min = computeDaylightLeftMin(hf.time, hf.sunset);
+        auto it_sun = sunset_by_date.find(date_key);
+        auto it_rise = sunrise_by_date.find(date_key);
+        if(it_sun != sunset_by_date.end() && it_rise != sunrise_by_date.end()) {
+            hf.sunset = it_sun->second;
+            hf.daylight_left_min = computeDaylightLeftMin(hf.time, it_rise->second,  hf.sunset);
         }
 
         result.push_back(hf);

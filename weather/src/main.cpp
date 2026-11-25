@@ -1,82 +1,89 @@
-// CLI entry point for Phase 1: reads weather scenarios from a CSV file and prints safety assessments.
+// Phase 2 CLI: fetches live Open-Meteo forecast for Mt. Hymettus (1026 m),
+// compares lapse-rate adjustment, and prints hourly safety verdicts for tomorrow.
 #include "Atmosphere.hpp"
-#include "Conditions.hpp"
+#include "Cache.hpp"
+#include "OpenMeteoClient.hpp"
 #include "SafetyRules.hpp"
 #include <exception>
-#include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <sstream>
-#include <string>
-#include <vector>
 
-int main(int argc, char* argv[]) {
-    // Use the file path provided on the command line, or default to weather/data/scenarios.csv.
-    std::string path = (argc > 1) ? argv[1] : "weather/data/scenarios.csv";
-    std::ifstream file(path);
-    if(!file) {
-        std::cerr << "Error: cannot open file " << path << "\n";
-        return 1;
+// Helper that checks ForecastCache before calling OpenMeteoClient over HTTPS.
+static std::vector<HourlyForecast> getForecastCached(
+    OpenMeteoClient& client,
+    ForecastCache& cache,
+    double lat,
+    double lon,
+    std::optional<double> elevation_m) {
+    if (auto cached = cache.get(lat, lon, elevation_m)) {
+        return *cached;
     }
+    auto fresh = client.fetchForecast(lat, lon, elevation_m, 2);
+    cache.put(lat, lon, elevation_m, fresh);
+    return fresh;
+}
 
-    // Mandatory user disclaimer: verdicts are an advisory aid, not a safety guarantee.
-    std::cout << "Note: This verdict is an advisory aid, not a guarantee of safety.\n\n";
-    
-    // Process the CSV file one line (one scenario) at a time.
-    std::string line;
-    while(std::getline(file, line)) {
-        if(line.empty()) continue;
+int main() {
+    constexpr double HYMETTUS_LAT = 37.94;
+    constexpr double HYMETTUS_LON = 23.82;
+    constexpr double HYMETTUS_ELEV_M = 1026.0;
+    constexpr int HIKE_DURATION_MIN = 180; // 3-hour hike
 
-        // Split the CSV line into individual comma-separated fields.
-        std::stringstream ss(line);
-        std::string cell;
-        std::vector<std::string> fields;
-        while(std::getline(ss, cell, ',')) {
-            fields.push_back(cell);
+    std::cout << "Note: This verdict is an advisory aid, not a guarantee of safety.\n"
+              << "Weather data by Open-Meteo.com (CC BY 4.0)\n\n";
+
+    try {
+        OpenMeteoClient client;
+        ForecastCache cache;
+
+        // 1. Fetch forecast at summit elevation (1026 m) and default model elevation
+        auto summit_hours = getForecastCached(client, cache, HYMETTUS_LAT, HYMETTUS_LON, HYMETTUS_ELEV_M);
+        auto raw_hours = getForecastCached(client, cache, HYMETTUS_LAT, HYMETTUS_LON, std::nullopt);
+
+        if (summit_hours.size() < 48 || raw_hours.size() < 48) {
+            std::cerr << "Error: incomplete 2-day forecast received.\n";
+            return 1;
         }
 
-        // Fail-safe check: never output GO if any of the 10 expected columns are missing.
-        if(fields.size() < 10) {
-            std::string name = fields.empty() ? "Uknown" : fields[0];
-            std::cout << "Scenario: " << name << "\n" << "  Verdict: CAUTION\n" << "  Reason: Incomplete data\n\n";
-            continue;
-        }
+        // 2. Compare Open-Meteo elevation correction vs. Phase 1 lapse-rate formula (at 12:00 tomorrow)
+        const auto& om_noon = summit_hours[36];
+        const auto& raw_noon = raw_hours[36];
+        double phase1_temp = temperatureAtElevation(
+            raw_noon.conditions.temperature_c, raw_noon.conditions.elevation_m, HYMETTUS_ELEV_M);
 
-        // Parse numeric values, compute atmospheric adjustments, and evaluate safety rules.
-        try {
-            std::string name = fields[0];
-            Conditions c;
-            c.temperature_c = std::stod(fields[1]);
-            c.wind_kmh = std::stod(fields[2]);
-            c.gusts_kmh = std::stod(fields[3]);
-            c.precip_probability_pct = std::stoi(fields[4]);
-            c.weather_code = std::stoi(fields[5]);
-            c.elevation_m = std::stod(fields[6]);
-            
-            double target_elev_m = std::stod(fields[7]);
-            int daylight_min = std::stoi(fields[8]);
-            int duration_min = std::stoi(fields[9]);
+        std::cout << std::fixed << std::setprecision(1);
+        std::cout << "=== Elevation Temperature Comparison (" << om_noon.time << ") ===\n"
+                  << "  Model grid elevation (" << raw_noon.conditions.elevation_m << " m): "
+                  << raw_noon.conditions.temperature_c << " C\n"
+                  << "  Open-Meteo at 1026 m:           " << om_noon.conditions.temperature_c << " C\n"
+                  << "  Phase 1 lapse-rate at 1026 m:   " << phase1_temp << " C\n\n";
 
-            // Compute temperature and wind chill at target elevation, then run all safety rules.
-            double temp_at_elev = temperatureAtElevation(c.temperature_c, c.elevation_m, target_elev_m);
-            double feels_like = windChill(temp_at_elev, c.wind_kmh);
-            Assessment res = evaluateSafety(c, target_elev_m, daylight_min, duration_min);
+        // 3. Print hourly verdicts for tomorrow (hours 24..47)
+        std::cout << "=== Mt. Hymettus Summit (1026 m) - Tomorrow's Hourly Verdicts (3h hike) ===\n";
+        for (std::size_t i = 24; i < 48; i++) {
+            const auto& h = summit_hours[i];
+            double feels_like = windChill(h.conditions.temperature_c, h.conditions.wind_kmh);
+            Assessment res = evaluateSafety(
+                h.conditions, HYMETTUS_ELEV_M, h.daylight_left_min, HIKE_DURATION_MIN);
 
-            // Print formatted summary (1 decimal place) and all triggered warning reasons.
-            std::cout << std::fixed << std::setprecision(1);
-            std::cout << "Scenario: " << name << " (target: " << target_elev_m << " m)\n" 
-                      << "  Temperature at elevation: " << temp_at_elev << " C\n"
-                      << "  Feels like (wind chill):  " << feels_like << " C\n"
-                      << "  Verdict: " << toString(res.verdict) << "\n";
-            
-            for(const std::string& reason : res.reasons) {
-                std::cout << "  - " << reason << "\n";
+            std::cout << h.time
+                      << " | Temp: " << std::setw(5) << h.conditions.temperature_c << " C"
+                      << " | Feels: " << std::setw(5) << feels_like << " C"
+                      << " | Gusts: " << std::setw(4) << h.conditions.gusts_kmh << " km/h"
+                      << " | " << std::setw(7) << toString(res.verdict);
+
+            if (!res.reasons.empty()) {
+                std::cout << " (" << res.reasons[0];
+                for (std::size_t r = 1; r < res.reasons.size(); r++) {
+                    std::cout << "; " << res.reasons[r];
+                }
+                std::cout << ")";
             }
             std::cout << "\n";
-        } catch (const std::exception& e) {
-            // Catch and report invalid numeric strings or out-of-range physical values without crashing.
-            std::cerr << "Rejected invalid scenario line: " << e.what() << "\n\n";
         }
+    } catch (const std::exception& e) {
+        std::cerr << "Error fetching forecast: " << e.what() << "\n";
+        return 1;
     }
 
     return 0;
