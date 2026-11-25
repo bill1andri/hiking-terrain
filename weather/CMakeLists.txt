@@ -7,7 +7,7 @@ find_package(OpenSSL REQUIRED)
 find_package(Threads REQUIRED)
 
 # Static core library containing atmospheric and safety rule logic (without main).
-add_library(weather_core STATIC src/Atmosphere.cpp src/SafetyRules.cpp src/OpenMeteoClient.cpp)
+add_library(weather_core STATIC src/Atmosphere.cpp src/SafetyRules.cpp src/OpenMeteoClient.cpp src/Cache.cpp)
 target_include_directories(weather_core PUBLIC include)
 target_include_directories(weather_core SYSTEM PRIVATE third_party)
 target_link_libraries(weather_core PUBLIC OpenSSL::SSL OpenSSL::Crypto Threads::Threads)

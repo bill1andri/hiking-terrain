@@ -1,4 +1,5 @@
 #include "OpenMeteoClient.hpp"
+#include "Cache.hpp"
 #include <cmath>
 #include <fstream>
 #include <iostream>
@@ -52,6 +53,22 @@ int main() {
     }
     if(!threw_missing) {
         std::cerr << "FAIL: expected exception when 'hourly' field is missing\n";
+        failures++;
+    }
+
+    //Test 5: Cache hit on 2-decimal rounded coordinates and TTL expiration
+    ForecastCache cache(std::chrono::minutes(30));
+    cache.put(37.941, 23.824, 1026.0, hours);
+    auto hit = cache.get(37.939, 23.818, 1026.0); //Both round to 37.94, 23.82
+    if(!hit.has_value() || hit->size() != 48) {
+        std::cerr << "FAIL: expected cache hit for nearby rounded coordinates\n";
+        failures++;
+    } 
+
+    ForecastCache expired_cache(std::chrono::seconds(0));
+    expired_cache.put(37.94, 23.82, 1026.0, hours);
+    if(expired_cache.get(37.94, 23.82, 1026.0).has_value()) {
+        std::cerr << "FAIL: expected cache miss when TTL is 0s\n";
         failures++;
     }
 
