@@ -31,6 +31,12 @@ add_executable(crop_probe src/crop_probe.cpp)
 target_link_libraries(crop_probe PRIVATE terrain_core)
 target_compile_options(crop_probe PRIVATE -Wall -Wextra -Wpedantic -Wshadow)
 
+find_package(Threads REQUIRED)
+add_executable(server src/server_main.cpp)
+target_include_directories(server SYSTEM PRIVATE third_party)
+target_link_libraries(server PRIVATE terrain_core Threads::Threads)
+target_compile_options(server PRIVATE -Wall -Wextra -Wpedantic -Wshadow)
+
 # ---------- Tests (τρέχουν με ctest) ----------
 enable_testing()
 
